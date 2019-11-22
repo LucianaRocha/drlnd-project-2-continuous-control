@@ -44,16 +44,26 @@ class Agent():
         self.critic_target = Critic(state_size, action_size, seed).to(device)
         self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_critic)
 
-        # Replay memory
-        self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
         # Initialize time step (for updating every UPDATE_EVERY steps)
         self.t_step = 0
 
-    def step():
-        pass
+    def act(self, state):
+        """Returns actions for given state as per current policy.
 
-    def act():
-        pass
+        Params
+        ======
+            state (array_like): current state
+            eps (float): epsilon, for epsilon-greedy action selection
+        """
+        state = torch.from_numpy(state).float().to(device)
+        self.actor_local.eval()
+        with torch.no_grad():
+            action_values = self.actor_local(state)
+        self.actor_local.train()
+        return action_values.data.cpu().numpy()
+
+    def step():
+        pass        
 
     def learn():
         pass
