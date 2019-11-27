@@ -1,5 +1,6 @@
 from collections import namedtuple, deque
 
+import copy
 import numpy as np
 import random
 import torch
@@ -15,7 +16,7 @@ GAMMA = 0.99            # discount factor
 TAU = 1e-2              # for soft update of target parameters
 LR_actor = 5e-4         # learning rate for actor
 LR_critic = 5e-4        # learning rate for critic
-UPDATE_EVERY = 4        # how often to update the network
+WEIGHT_DECAY = 0        # L2 weight decay
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -46,12 +47,15 @@ class Agent():
         self.critic_local = Critic(state_size, action_size, seed).to(device)
         self.critic_target = Critic(state_size, action_size, seed).to(device)
         self.soft_update(self.critic_local, self.critic_target, 1)
-        self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_critic)
+        self.critic_optimizer = optim.Adam(self.critic_local.parameters(), lr=LR_critic, weight_decay=WEIGHT_DECAY)
+        
+        # Noise process
+        self.noise = OUNoise(action_size, seed)        
 
         # Replay memory
         self.memory = ReplayBuffer(action_size, BUFFER_SIZE, BATCH_SIZE, seed)
 
-    def act(self, state):
+    def act(self, state, add_noise=True):
         """Returns actions for given state as per current policy.
 
         Params
@@ -62,16 +66,22 @@ class Agent():
         self.actor_local.eval()
         with torch.no_grad():
             action_values = self.actor_local(state)
+            action_values = action_values.data.cpu().numpy()
         self.actor_local.train()
-        return action_values.data.cpu().numpy()
+        if add_noise:
+            action_values += self.noise.sample()        
+        return np.clip(action_values, -1, 1)
 
     def step(self, state, action, reward, next_state):
         # Save experience in replay memory
         self.memory.add(state, action, reward, next_state)
         # If enough samples are available in memory, get random subset and learn
-        if len(self.memory) >= BATCH_SIZE:
+        if len(self.memory) > BATCH_SIZE:
             experiences = self.memory.sample()
             self.learn(experiences, GAMMA)
+
+    def reset(self):
+        self.noise.reset()
 
     def learn(self, experiences, gamma):
         """Update value parameters using given batch of experience tuples.
@@ -94,9 +104,9 @@ class Agent():
         self.critic_optimizer.step()
 
         # update actor policy
-        self.actor_optimizer.zero_grad()
         actions_predict = self.actor_local(states)
         loss = -self.critic_local(states, actions_predict).mean()
+        self.actor_optimizer.zero_grad()
         loss.backward()
         self.actor_optimizer.step()
 
@@ -116,6 +126,29 @@ class Agent():
         """
         for target_param, local_param in zip(target_model.parameters(), local_model.parameters()):
             target_param.data.copy_(tau*local_param.data + (1.0-tau)*target_param.data)
+
+
+class OUNoise:
+    """Ornstein-Uhlenbeck process."""
+
+    def __init__(self, size, seed, mu=0., theta=0.9, sigma=0.01):
+        """Initialize parameters and noise process."""
+        self.mu = mu * np.ones(size)
+        self.theta = theta
+        self.sigma = sigma
+        self.seed = random.seed(seed)
+        self.reset()
+
+    def reset(self):
+        """Reset the internal state (= noise) to mean (mu)."""
+        self.state = copy.copy(self.mu)
+
+    def sample(self):
+        """Update internal state and return it as a noise sample."""
+        x = self.state
+        dx = self.theta * (self.mu - x) + self.sigma * np.array([random.random() for i in range(len(x))])
+        self.state = x + dx
+        return self.state
 
 
 class ReplayBuffer:
